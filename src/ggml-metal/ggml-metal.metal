@@ -4850,20 +4850,27 @@ kernel void kernel_conv_transpose_1d(
         uint3   tgpig[[threadgroup_position_in_grid]],
         uint3   tgpg[[threadgroups_per_grid]]) {
 
+    const int32_t idx = tgpig[0];  // output position
+    const int32_t oc  = tgpig[1];  // output channel
+
     float v = 0.0f;
 
     for (int64_t c = 0; c < args.IC; c++) {
-        const int32_t kernel_offset = c * tgpg[1] * args.K + args.K * tgpig[1];
+        const int32_t kernel_offset = c * tgpg[1] * args.K + args.K * oc;
         const int32_t input_offset = c * args.IL;
 
-        for (int64_t i = 0; i < args.IL; i++) {
-            if (tgpig[0] >= i * args.s0 && tgpig[0] < i * args.s0 + args.K) {
-                v += src0[kernel_offset + tgpig[0] - i * args.s0] * src1[input_offset + i];
-            }
+        // Only iterate over input positions that contribute to this output
+        // (same bounds as CUDA kernel, avoids O(IL) brute-force)
+        const int32_t i_min = (idx >= args.K) ? ((idx - args.K + args.s0) / args.s0) : 0;
+        const int32_t i_max_val = idx / args.s0;
+        const int32_t i_max = (i_max_val < args.IL) ? i_max_val : (args.IL - 1);
+
+        for (int32_t i = i_min; i <= i_max; i++) {
+            v += float(src0[kernel_offset + idx - i * args.s0]) * src1[input_offset + i];
         }
     }
 
-    device float * dst_ptr = (device float *) (dst + tgpig[0] * args.nb0 + tgpig[1] * args.nb1);
+    device float * dst_ptr = (device float *) (dst + idx * args.nb0 + oc * args.nb1);
 
     dst_ptr[0] = v;
 }
