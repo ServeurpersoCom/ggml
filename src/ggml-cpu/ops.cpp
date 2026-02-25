@@ -6622,8 +6622,63 @@ static inline int64_t ggml_wrap_around(int64_t coord, int64_t size) {
     return (coord  + size) % size; // adding size avoids negative number weirdness
 }
 
-// ggml_compute_forward_conv_2d
+// ggml_compute_forward_col2im_1d
+//
+// Scatter-add columns [K*OC, T_in] -> signal [T_out, OC]
+// where T_out = (T_in - 1)*s + K.  Gather approach: each output reads ceil(K/s) inputs.
 
+void ggml_compute_forward_col2im_1d(
+        const ggml_compute_params * params,
+        ggml_tensor * dst) {
+
+    const ggml_tensor * src = dst->src[0];  // [K*OC, T_in]
+
+    GGML_ASSERT(src->type == GGML_TYPE_F32);
+    GGML_ASSERT(dst->type == GGML_TYPE_F32);
+
+    const int32_t s0 = ((const int32_t *)(dst->op_params))[0];
+    const int32_t OC = ((const int32_t *)(dst->op_params))[1];
+
+    const int64_t K_OC = src->ne[0];
+    const int64_t T_in = src->ne[1];
+    const int64_t K    = K_OC / OC;
+    const int64_t T_out = dst->ne[0];
+
+    const float * col_data = (const float *) src->data;
+    float       * dst_data = (float *)       dst->data;
+
+    const int ith = params->ith;
+    const int nth = params->nth;
+
+    // Parallelize over output channels (rows of dst)
+    const int64_t nr = OC;
+    const int64_t dr = (nr + nth - 1) / nth;
+    const int64_t ir0 = dr * ith;
+    const int64_t ir1 = ir0 + dr < nr ? ir0 + dr : nr;
+
+    for (int64_t oc = ir0; oc < ir1; oc++) {
+        for (int64_t t_out = 0; t_out < T_out; t_out++) {
+            // Gather: find all (t_in, k) where t_in * s + k == t_out, 0 <= k < K
+            int64_t t_in_min = (t_out - K + 1 + s0 - 1) / s0;  // ceil((t_out-K+1)/s)
+            if (t_in_min < 0) t_in_min = 0;
+            int64_t t_in_max = t_out / s0;
+            if (t_in_max >= T_in) t_in_max = T_in - 1;
+
+            float sum = 0.0f;
+            for (int64_t t_in = t_in_min; t_in <= t_in_max; t_in++) {
+                int64_t k = t_out - t_in * s0;
+                if (k >= 0 && k < K) {
+                    // col layout: [K*OC, T_in], element (oc*K+k, t_in)
+                    sum += col_data[(oc * K + k) + t_in * K_OC];
+                }
+            }
+            // dst layout: [T_out, OC], element (t_out, oc)
+            dst_data[t_out + oc * T_out] = sum;
+        }
+    }
+}
+
+// ggml_compute_forward_conv_2d
 
 static void ggml_compute_forward_conv_2d_impl(const ggml_compute_params * params,
                                               const ggml_tensor *         kernel,  // [KW, KH, IC, OC]
