@@ -6678,6 +6678,40 @@ void ggml_compute_forward_col2im_1d(
     }
 }
 
+// ggml_compute_forward_snake
+// Fused: y = x + sin^2(a * x) * inv_b
+
+void ggml_compute_forward_snake(
+        const struct ggml_compute_params * params,
+        struct ggml_tensor * dst) {
+    const struct ggml_tensor * src0 = dst->src[0]; // x: [T, C]
+    const struct ggml_tensor * src1 = dst->src[1]; // a: [1, C] or [C]
+    const struct ggml_tensor * src2 = dst->src[2]; // inv_b: [1, C] or [C]
+
+    const int64_t T = src0->ne[0];
+    const int64_t C = src0->ne[1];
+
+    const float * xd = (const float *)src0->data;
+    const float * ad = (const float *)src1->data;
+    const float * bd = (const float *)src2->data;
+    float       * yd = (float       *)dst->data;
+
+    const int ith = params->ith;
+    const int nth = params->nth;
+
+    for (int64_t c = ith; c < C; c += nth) {
+        const float ac = ad[c];
+        const float bc = bd[c];
+        const float * xc = xd + c * T;
+        float       * yc = yd + c * T;
+        for (int64_t t = 0; t < T; t++) {
+            const float xi = xc[t];
+            const float s  = sinf(ac * xi);
+            yc[t] = xi + s * s * bc;
+        }
+    }
+}
+
 // ggml_compute_forward_conv_2d
 
 static void ggml_compute_forward_conv_2d_impl(const ggml_compute_params * params,
