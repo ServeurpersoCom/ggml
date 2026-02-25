@@ -4894,6 +4894,29 @@ kernel void kernel_conv_transpose_1d<half>(
     uint3    tgpg[[threadgroups_per_grid]]);
 
 
+kernel void kernel_col2im_1d(
+        constant ggml_metal_kargs_col2im_1d & args,
+        device const float * col,
+        device       float * dst,
+        uint3   tgpig[[threadgroup_position_in_grid]]) {
+
+    const int t_out = tgpig[0];
+    const int oc    = tgpig[1];
+
+    int t_in_min = (t_out - args.K + args.s0) / args.s0;
+    if (t_in_min < 0) t_in_min = 0;
+    int t_in_max = t_out / args.s0;
+    if (t_in_max >= args.T_in) t_in_max = args.T_in - 1;
+
+    float sum = 0.0f;
+    for (int t_in = t_in_min; t_in <= t_in_max; t_in++) {
+        const int k = t_out - t_in * args.s0;
+        sum += col[(oc * args.K + k) + t_in * args.K_OC];
+    }
+
+    dst[t_out + oc * args.T_out] = sum;
+}
+
 typedef void (conv_transpose_2d_t)(
         constant ggml_metal_kargs_conv_transpose_2d & args,
         device const float * src0,
