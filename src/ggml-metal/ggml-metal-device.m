@@ -1081,6 +1081,7 @@ bool ggml_metal_device_supports_op(ggml_metal_device_t dev, const struct ggml_te
         case GGML_OP_REPEAT:
         case GGML_OP_CONV_TRANSPOSE_1D:
         case GGML_OP_COL2IM_1D:
+        case GGML_OP_SNAKE:
             return true;
         case GGML_OP_CONV_TRANSPOSE_2D:
             return ggml_is_contiguous(op->src[0]) && ggml_is_contiguous(op->src[1]) &&

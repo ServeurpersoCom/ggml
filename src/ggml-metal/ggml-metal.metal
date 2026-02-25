@@ -4917,6 +4917,24 @@ kernel void kernel_col2im_1d(
     dst[t_out + oc * args.T_out] = sum;
 }
 
+kernel void kernel_snake(
+        device const ggml_metal_kargs_snake & args [[buffer(0)]],
+        device const float * x      [[buffer(1)]],
+        device const float * a      [[buffer(2)]],
+        device const float * inv_b  [[buffer(3)]],
+        device       float * dst    [[buffer(4)]],
+        uint         tgpig [[threadgroup_position_in_grid]],
+        uint         tpitg [[thread_position_in_threadgroup]],
+        uint         ntg   [[threads_per_threadgroup]]) {
+    const int idx = tgpig * ntg + tpitg;
+    if (idx >= args.T * args.C) return;
+
+    const int c = idx / args.T;
+    const float xi = x[idx];
+    const float s  = sin(a[c] * xi);
+    dst[idx] = xi + s * s * inv_b[c];
+}
+
 typedef void (conv_transpose_2d_t)(
         constant ggml_metal_kargs_conv_transpose_2d & args,
         device const float * src0,

@@ -1753,6 +1753,11 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_col2im_1d(ggml_m
     return res;
 }
 
+ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_snake(ggml_metal_library_t lib, const ggml_tensor * op) {
+    GGML_UNUSED(op);
+    return get_pipeline(lib, "kernel_snake");
+}
+
 ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_conv_transpose_2d(ggml_metal_library_t lib, const ggml_tensor * op) {
     assert(op->op == GGML_OP_CONV_TRANSPOSE_2D);
 
