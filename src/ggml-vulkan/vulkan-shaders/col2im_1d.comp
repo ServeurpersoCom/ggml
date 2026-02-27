@@ -1,0 +1,42 @@
+#version 450
+
+#include "types.glsl"
+
+layout (binding = 0) readonly buffer A {A_TYPE data_a[];};   // columns: [K_OC, T_in]
+layout (binding = 1) writeonly buffer D {D_TYPE data_d[];};  // output:  [T_out, OC]
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout (push_constant) uniform parameter {
+    uint32_t T_out;
+    uint32_t OC;
+    uint32_t K_OC;
+    uint32_t T_in;
+    uint32_t K;
+    int32_t  stride;
+} p;
+
+void main() {
+    const uint32_t idx = gl_GlobalInvocationID.x;
+    const uint32_t total = p.T_out * p.OC;
+    if (idx >= total) return;
+
+    const uint32_t t_out = idx % p.T_out;
+    const uint32_t oc    = idx / p.T_out;
+
+    float val = 0.0;
+    for (uint32_t k = 0; k < p.K; k++) {
+        int32_t t_shifted = int32_t(t_out) - int32_t(k);
+        if (t_shifted < 0) continue;
+        if (t_shifted % p.stride != 0) continue;
+        uint32_t t_in = uint32_t(t_shifted / p.stride);
+        if (t_in >= p.T_in) continue;
+
+        // col layout: [K_OC, T_in], column index = oc * K + k (GGML natural order)
+        uint32_t col_idx = (oc * p.K + k) + t_in * p.K_OC;
+        val += data_a[col_idx];
+    }
+
+    // dst layout: [T_out, OC], element (t_out, oc) = t_out + oc * T_out
+    data_d[t_out + oc * p.T_out] = val;
+}
