@@ -1,0 +1,26 @@
+#version 450
+
+#include "types.glsl"
+
+layout (binding = 0) readonly buffer X    {float data_x[];};
+layout (binding = 1) readonly buffer A    {float data_a[];};
+layout (binding = 2) readonly buffer INVB {float data_inv_b[];};
+layout (binding = 3) writeonly buffer D   {float data_d[];};
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout (push_constant) uniform parameter {
+    uint32_t T;
+    uint32_t C;
+} p;
+
+void main() {
+    const uint32_t idx = gl_GlobalInvocationID.x;
+    if (idx >= p.T * p.C) return;
+
+    const uint32_t c = idx / p.T;
+
+    const float xi = data_x[idx];
+    const float s  = sin(data_a[c] * xi);
+    data_d[idx] = xi + s * s * data_inv_b[c];
+}
