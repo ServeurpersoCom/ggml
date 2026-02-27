@@ -1472,6 +1472,7 @@ struct vk_op_col2im_1d_push_constants {
     uint32_t T_in;
     uint32_t K;
     int32_t  stride;
+    int32_t  p0;
 };
 
 struct vk_op_snake_push_constants {
@@ -11941,6 +11942,7 @@ static void ggml_vk_col2im_1d(ggml_backend_vk_context * ctx, vk_context& subctx,
 
     const int32_t stride = dst->op_params[0];
     const int32_t oc     = dst->op_params[1];
+    const int32_t p0     = dst->op_params[2];
 
     const uint32_t K_OC  = static_cast<uint32_t>(src0->ne[0]);
     const uint32_t T_in  = static_cast<uint32_t>(src0->ne[1]);
@@ -11955,6 +11957,7 @@ static void ggml_vk_col2im_1d(ggml_backend_vk_context * ctx, vk_context& subctx,
     p.T_in   = T_in;
     p.K      = K;
     p.stride = stride;
+    p.p0     = p0;
 
     ggml_vk_op_f32<vk_op_col2im_1d_push_constants>(ctx, subctx, src0, nullptr, nullptr, nullptr, dst, GGML_OP_COL2IM_1D, std::move(p));
 }
@@ -16782,7 +16785,8 @@ static void ggml_vk_check_results_0(ggml_backend_vk_context * ctx, ggml_cgraph *
         } else if (tensor->op == GGML_OP_COL2IM_1D) {
             const int32_t stride = tensor->op_params[0];
             const int32_t oc     = tensor->op_params[1];
-            tensor_clone = ggml_col2im_1d(ggml_ctx, src_clone[0], stride, oc);
+            const int32_t p0     = tensor->op_params[2];
+            tensor_clone = ggml_col2im_1d(ggml_ctx, src_clone[0], stride, oc, p0);
         } else if (tensor->op == GGML_OP_SNAKE) {
             tensor_clone = ggml_snake(ggml_ctx, src_clone[0], src_clone[1], src_clone[2]);
             tensor_clone = ggml_conv_transpose_1d(ggml_ctx, src_clone[0], src_clone[1], s0, p0, d0);

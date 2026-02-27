@@ -6666,6 +6666,7 @@ void ggml_compute_forward_col2im_1d(
 
     const int32_t s0 = ((const int32_t *)(dst->op_params))[0];
     const int32_t OC = ((const int32_t *)(dst->op_params))[1];
+    const int32_t p0 = ((const int32_t *)(dst->op_params))[2];
 
     const int64_t K_OC = src->ne[0];
     const int64_t T_in = src->ne[1];
@@ -6686,15 +6687,16 @@ void ggml_compute_forward_col2im_1d(
 
     for (int64_t oc = ir0; oc < ir1; oc++) {
         for (int64_t t_out = 0; t_out < T_out; t_out++) {
-            // Gather: find all (t_in, k) where t_in * s + k == t_out, 0 <= k < K
-            int64_t t_in_min = (t_out - K + 1 + s0 - 1) / s0;  // ceil((t_out-K+1)/s)
+            const int64_t t_abs = t_out + p0;  // absolute position in uncropped signal
+            // Gather: find all (t_in, k) where t_in * s + k == t_abs, 0 <= k < K
+            int64_t t_in_min = (t_abs - K + 1 + s0 - 1) / s0;  // ceil((t_abs-K+1)/s)
             if (t_in_min < 0) t_in_min = 0;
-            int64_t t_in_max = t_out / s0;
+            int64_t t_in_max = t_abs / s0;
             if (t_in_max >= T_in) t_in_max = T_in - 1;
 
             float sum = 0.0f;
             for (int64_t t_in = t_in_min; t_in <= t_in_max; t_in++) {
-                int64_t k = t_out - t_in * s0;
+                int64_t k = t_abs - t_in * s0;
                 if (k >= 0 && k < K) {
                     // col layout: [K*OC, T_in], element (oc*K+k, t_in)
                     sum += col_data[(oc * K + k) + t_in * K_OC];

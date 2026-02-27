@@ -8,7 +8,7 @@ static __global__ void col2im_1d_kernel(
         float * __restrict__ dst,
         const int T_in, const int T_out,
         const int OC, const int K, const int K_OC,
-        const int s0, const int total) {
+        const int s0, const int p0, const int total) {
 
     const int idx = threadIdx.x + blockIdx.x * blockDim.x;
     if (idx >= total) return;
@@ -16,16 +16,17 @@ static __global__ void col2im_1d_kernel(
     // dst layout: [T_out, OC] - ne[0]=T_out fastest
     const int t_out = idx % T_out;
     const int oc    = idx / T_out;
+    const int t_abs = t_out + p0;  // absolute position in uncropped signal
 
-    // Gather: find all (t_in, k) where t_in*s + k == t_out, 0 <= k < K
-    int t_in_min = (t_out - K + s0) / s0;  // ceil((t_out - K + 1) / s)
+    // Gather: find all (t_in, k) where t_in*s + k == t_abs, 0 <= k < K
+    int t_in_min = (t_abs - K + s0) / s0;  // ceil((t_abs - K + 1) / s)
     if (t_in_min < 0) t_in_min = 0;
-    int t_in_max = t_out / s0;
+    int t_in_max = t_abs / s0;
     if (t_in_max >= T_in) t_in_max = T_in - 1;
 
     float sum = 0.0f;
     for (int t_in = t_in_min; t_in <= t_in_max; t_in++) {
-        const int k = t_out - t_in * s0;
+        const int k = t_abs - t_in * s0;
         // col layout: [K*OC, T_in] - ne[0]=K*OC, order oc*K+k (K fastest)
         sum += col[(oc * K + k) + t_in * K_OC];
     }
@@ -45,6 +46,7 @@ void ggml_cuda_op_col2im_1d(ggml_backend_cuda_context & ctx, ggml_tensor * dst) 
 
     const int32_t s0 = ((const int32_t *)(dst->op_params))[0];
     const int32_t OC = ((const int32_t *)(dst->op_params))[1];
+    const int32_t p0 = ((const int32_t *)(dst->op_params))[2];
 
     const int K_OC = (int) src0->ne[0];
     const int T_in = (int) src0->ne[1];
@@ -56,5 +58,5 @@ void ggml_cuda_op_col2im_1d(ggml_backend_cuda_context & ctx, ggml_tensor * dst) 
     const int num_blocks = (total + block_size - 1) / block_size;
 
     col2im_1d_kernel<<<num_blocks, block_size, 0, stream>>>(
-        src0_d, dst_d, T_in, T_out, OC, K, K_OC, s0, total);
+        src0_d, dst_d, T_in, T_out, OC, K, K_OC, s0, p0, total);
 }

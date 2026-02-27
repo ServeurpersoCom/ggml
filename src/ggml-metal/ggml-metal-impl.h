@@ -610,6 +610,7 @@ typedef struct {
     int32_t  K;
     int32_t  K_OC;
     int32_t  s0;
+    int32_t  p0;
 } ggml_metal_kargs_col2im_1d;
 
 typedef struct {

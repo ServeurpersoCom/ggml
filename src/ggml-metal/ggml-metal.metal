@@ -4902,15 +4902,16 @@ kernel void kernel_col2im_1d(
 
     const int t_out = tgpig[0];
     const int oc    = tgpig[1];
+    const int t_abs = t_out + args.p0;  // absolute position in uncropped signal
 
-    int t_in_min = (t_out - args.K + args.s0) / args.s0;
+    int t_in_min = (t_abs - args.K + args.s0) / args.s0;
     if (t_in_min < 0) t_in_min = 0;
-    int t_in_max = t_out / args.s0;
+    int t_in_max = t_abs / args.s0;
     if (t_in_max >= args.T_in) t_in_max = args.T_in - 1;
 
     float sum = 0.0f;
     for (int t_in = t_in_min; t_in <= t_in_max; t_in++) {
-        const int k = t_out - t_in * args.s0;
+        const int k = t_abs - t_in * args.s0;
         sum += col[(oc * args.K + k) + t_in * args.K_OC];
     }
 

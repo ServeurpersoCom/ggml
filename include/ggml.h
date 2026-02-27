@@ -2000,12 +2000,13 @@ extern "C" {
 
     // col2im_1d: scatter-add GEMM columns back to 1D signal
     // a: [K*OC, T_in]  (columns from matmul, K = a->ne[0]/OC)
-    // result: [T_out, OC]  where T_out = (T_in - 1)*s0 + K
+    // result: [T_out, OC]  where T_out = (T_in - 1)*s0 + K - 2*p0
     GGML_API struct ggml_tensor * ggml_col2im_1d(
         struct ggml_context * ctx,
         struct ggml_tensor  * a,   // columns [K*OC, T_in]
         int                   s0,  // stride
-        int                   oc); // output channels
+        int                   oc,  // output channels
+        int                   p0); // padding to crop from both sides
 
     // Fused Snake activation: y = x + sin^2(a * x) * inv_b
     // x: [T, C], a: [1, C] or [C], inv_b: [1, C] or [C]

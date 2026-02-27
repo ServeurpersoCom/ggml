@@ -3850,6 +3850,7 @@ int ggml_metal_op_col2im_1d(ggml_metal_op_t ctx, int idx) {
 
     const int32_t s0 = ((const int32_t *)(op->op_params))[0];
     const int32_t OC = ((const int32_t *)(op->op_params))[1];
+    const int32_t p0 = ((const int32_t *)(op->op_params))[2];
 
     const int32_t K_OC = (int32_t) op->src[0]->ne[0];
     const int32_t T_in = (int32_t) op->src[0]->ne[1];
@@ -3863,6 +3864,7 @@ int ggml_metal_op_col2im_1d(ggml_metal_op_t ctx, int idx) {
         /*.K     =*/ K,
         /*.K_OC  =*/ K_OC,
         /*.s0    =*/ s0,
+        /*.p0    =*/ p0,
     };
 
     auto pipeline = ggml_metal_library_get_pipeline_col2im_1d(lib, op);
