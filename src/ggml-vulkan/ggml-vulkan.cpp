@@ -10155,12 +10155,12 @@ static void ggml_vk_op_f32(ggml_backend_vk_context * ctx, vk_context& subctx, co
     case GGML_OP_COL2IM_1D:
         {
             const uint32_t total = uint32_t(dst->ne[0]) * uint32_t(dst->ne[1]);
-            elements = { (total + 255) / 256, 1, 1 };
+            elements = { total, 1, 1 };
         } break;
     case GGML_OP_SNAKE:
         {
             const uint32_t total = uint32_t(src0->ne[0]) * uint32_t(src0->ne[1]);
-            elements = { (total + 255) / 256, 1, 1 };
+            elements = { total, 1, 1 };
         } break;
     case GGML_OP_POOL_2D:
         {
