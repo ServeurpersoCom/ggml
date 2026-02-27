@@ -3706,8 +3706,11 @@ int ggml_metal_op_col2im_1d(ggml_metal_op_t ctx, int idx) {
 }
 
 int ggml_metal_op_snake(ggml_metal_op_t ctx, int idx) {
-    id<MTLComputeCommandEncoder> enc = ctx.enc;
-    const ggml_tensor * dst  = ctx.nodes[idx];
+    ggml_tensor * dst = ctx->node(idx);
+
+    ggml_metal_library_t lib = ctx->lib;
+    ggml_metal_encoder_t enc = ctx->enc;
+
     const ggml_tensor * src0 = dst->src[0];
     const ggml_tensor * src1 = dst->src[1];
     const ggml_tensor * src2 = dst->src[2];
@@ -3716,15 +3719,16 @@ int ggml_metal_op_snake(ggml_metal_op_t ctx, int idx) {
     const int C = (int)src0->ne[1];
     const int total = T * C;
 
-    auto pipeline = ggml_metal_library_get_pipeline_snake(ctx.lib, dst);
-    [enc setComputePipelineState:pipeline.pipeline];
+    auto pipeline = ggml_metal_library_get_pipeline_snake(lib, dst);
 
     ggml_metal_kargs_snake args = { T, C };
-    [enc setBytes:&args length:sizeof(args) atIndex:0];
-    ggml_metal_set_tensor(enc, src0, 1);
-    ggml_metal_set_tensor(enc, src1, 2);
-    ggml_metal_set_tensor(enc, src2, 3);
-    ggml_metal_set_tensor(enc, dst,  4);
+
+    ggml_metal_encoder_set_pipeline(enc, pipeline);
+    ggml_metal_encoder_set_bytes   (enc, &args, sizeof(args), 0);
+    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(src0), 1);
+    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(src1), 2);
+    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(src2), 3);
+    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(dst),  4);
 
     const int nth = 256;
     const int ntg = (total + nth - 1) / nth;
