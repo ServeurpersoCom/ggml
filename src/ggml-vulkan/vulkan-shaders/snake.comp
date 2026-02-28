@@ -15,11 +15,11 @@ layout (push_constant) uniform parameter {
 } p;
 
 void main() {
-    const uint32_t idx = gl_GlobalInvocationID.x;
-    if (idx >= p.T * p.C) return;
+    const uint32_t t = gl_GlobalInvocationID.x;
+    const uint32_t c = gl_GlobalInvocationID.y;
+    if (t >= p.T || c >= p.C) return;
 
-    const uint32_t c = idx / p.T;
-
+    const uint32_t idx = t + c * p.T;
     const float xi = data_x[idx];
     const float s  = sin(data_a[c] * xi);
     data_d[idx] = xi + s * s * data_inv_b[c];

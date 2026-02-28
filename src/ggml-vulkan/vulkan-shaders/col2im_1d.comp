@@ -18,13 +18,11 @@ layout (push_constant) uniform parameter {
 } p;
 
 void main() {
-    const uint32_t idx = gl_GlobalInvocationID.x;
-    const uint32_t total = p.T_out * p.OC;
-    if (idx >= total) return;
+    const uint32_t t_out = gl_GlobalInvocationID.x;
+    const uint32_t oc    = gl_GlobalInvocationID.y;
+    if (t_out >= p.T_out || oc >= p.OC) return;
 
-    const uint32_t t_out = idx % p.T_out;
-    const uint32_t oc    = idx / p.T_out;
-    const int32_t  t_abs = int32_t(t_out) + p.p0;  // absolute position in uncropped signal
+    const int32_t t_abs = int32_t(t_out) + p.p0; // absolute position in uncropped signal
 
     float val = 0.0;
     for (uint32_t k = 0; k < p.K; k++) {
