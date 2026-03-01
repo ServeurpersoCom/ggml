@@ -4917,11 +4917,9 @@ kernel void kernel_col2im_1d(
     dst[t_out + oc * args.T_out] = T(sum);
 }
 
-typedef decltype(kernel_col2im_1d<float>) kernel_col2im_1d_t;
-
-template [[host_name("kernel_col2im_1d_f32")]]  kernel kernel_col2im_1d_t kernel_col2im_1d<float>;
-template [[host_name("kernel_col2im_1d_f16")]]  kernel kernel_col2im_1d_t kernel_col2im_1d<half>;
-template [[host_name("kernel_col2im_1d_bf16")]] kernel kernel_col2im_1d_t kernel_col2im_1d<bfloat>;
+template [[host_name("kernel_col2im_1d_f32")]]  kernel void kernel_col2im_1d<float>(constant ggml_metal_kargs_col2im_1d &, device const float *, device float *, uint, uint, uint);
+template [[host_name("kernel_col2im_1d_f16")]]  kernel void kernel_col2im_1d<half>(constant ggml_metal_kargs_col2im_1d &, device const half *, device half *, uint, uint, uint);
+template [[host_name("kernel_col2im_1d_bf16")]] kernel void kernel_col2im_1d<bfloat>(constant ggml_metal_kargs_col2im_1d &, device const bfloat *, device bfloat *, uint, uint, uint);
 
 template <typename T>
 kernel void kernel_snake(
@@ -4942,11 +4940,9 @@ kernel void kernel_snake(
     dst[idx] = T(xi + s * s * inv_b[c]);
 }
 
-typedef decltype(kernel_snake<float>) kernel_snake_t;
-
-template [[host_name("kernel_snake_f32")]]  kernel kernel_snake_t kernel_snake<float>;
-template [[host_name("kernel_snake_f16")]]  kernel kernel_snake_t kernel_snake<half>;
-template [[host_name("kernel_snake_bf16")]] kernel kernel_snake_t kernel_snake<bfloat>;
+template [[host_name("kernel_snake_f32")]]  kernel void kernel_snake<float>(device const ggml_metal_kargs_snake &, device const float *, device const float *, device const float *, device float *, uint, uint, uint);
+template [[host_name("kernel_snake_f16")]]  kernel void kernel_snake<half>(device const ggml_metal_kargs_snake &, device const half *, device const float *, device const float *, device half *, uint, uint, uint);
+template [[host_name("kernel_snake_bf16")]] kernel void kernel_snake<bfloat>(device const ggml_metal_kargs_snake &, device const bfloat *, device const float *, device const float *, device bfloat *, uint, uint, uint);
 
 typedef void (conv_transpose_2d_t)(
         constant ggml_metal_kargs_conv_transpose_2d & args,
