@@ -3869,16 +3869,19 @@ int ggml_metal_op_col2im_1d(ggml_metal_op_t ctx, int idx) {
 
     auto pipeline = ggml_metal_library_get_pipeline_col2im_1d(lib, op);
 
+    const int total = T_out * OC;
+    const int nth = 256;
+    const int ntg = (total + nth - 1) / nth;
+
     ggml_metal_encoder_set_pipeline(enc, pipeline);
     ggml_metal_encoder_set_bytes (enc, &args, sizeof(args), 0);
     ggml_metal_encoder_set_buffer(enc, ggml_metal_get_buffer_id(op->src[0]), 1);
     ggml_metal_encoder_set_buffer(enc, ggml_metal_get_buffer_id(op),         2);
 
-    ggml_metal_encoder_dispatch_threadgroups(enc, T_out, OC, 1, 1, 1, 1);
+    ggml_metal_encoder_dispatch_threadgroups(enc, ntg, 1, 1, nth, 1, 1);
 
     return 1;
 }
-
 int ggml_metal_op_snake(ggml_metal_op_t ctx, int idx) {
     ggml_tensor * dst = ctx->node(idx);
 

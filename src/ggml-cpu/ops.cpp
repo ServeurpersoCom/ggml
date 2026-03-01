@@ -5924,6 +5924,19 @@ void ggml_compute_forward_rope_back(
     }
 }
 
+// Type-generic load/store helpers for F32, F16, BF16 custom ops (col2im_1d, snake)
+template <typename T>
+static inline float snake_load(T x);
+template <> inline float snake_load(float x)       { return x; }
+template <> inline float snake_load(ggml_fp16_t x) { return GGML_FP16_TO_FP32(x); }
+template <> inline float snake_load(ggml_bf16_t x) { return GGML_BF16_TO_FP32(x); }
+
+template <typename T>
+static inline T snake_store(float x);
+template <> inline float       snake_store<float>(float x)       { return x; }
+template <> inline ggml_fp16_t snake_store<ggml_fp16_t>(float x) { return GGML_FP32_TO_FP16(x); }
+template <> inline ggml_bf16_t snake_store<ggml_bf16_t>(float x) { return GGML_FP32_TO_BF16(x); }
+
 // ggml_compute_forward_conv_transpose_1d
 
 static void ggml_compute_forward_conv_transpose_1d_f16_f32(
@@ -6650,19 +6663,6 @@ static inline int64_t ggml_wrap_around(int64_t coord, int64_t size) {
     return (coord  + size) % size; // adding size avoids negative number weirdness
 }
 
-// Type-generic load/store helpers for F32, F16, BF16 custom ops (snake, col2im_1d)
-template <typename T_type>
-static inline float ggml_load_f32(T_type x);
-template <> inline float ggml_load_f32(float x)       { return x; }
-template <> inline float ggml_load_f32(ggml_fp16_t x) { return GGML_FP16_TO_FP32(x); }
-template <> inline float ggml_load_f32(ggml_bf16_t x) { return GGML_BF16_TO_FP32(x); }
-
-template <typename T_type>
-static inline T_type ggml_store_f32(float x);
-template <> inline float       ggml_store_f32<float>(float x)       { return x; }
-template <> inline ggml_fp16_t ggml_store_f32<ggml_fp16_t>(float x) { return GGML_FP32_TO_FP16(x); }
-template <> inline ggml_bf16_t ggml_store_f32<ggml_bf16_t>(float x) { return GGML_FP32_TO_BF16(x); }
-
 // ggml_compute_forward_col2im_1d
 //
 // Scatter-add columns [K*OC, T_in] -> signal [T_out, OC]
@@ -6711,11 +6711,11 @@ static void ggml_compute_forward_col2im_1d_impl(
                 int64_t k = t_abs - t_in * s0;
                 if (k >= 0 && k < K) {
                     // col layout: [K*OC, T_in], element (oc*K+k, t_in)
-                    sum += ggml_load_f32(col_data[(oc * K + k) + t_in * K_OC]);
+                    sum += snake_load(col_data[(oc * K + k) + t_in * K_OC]);
                 }
             }
             // dst layout: [T_out, OC], element (t_out, oc)
-            dst_data[t_out + oc * T_out] = ggml_store_f32<elem_t>(sum);
+            dst_data[t_out + oc * T_out] = snake_store<elem_t>(sum);
         }
     }
 }
@@ -6759,9 +6759,9 @@ static void ggml_compute_forward_snake_impl(
         const elem_t * xc = xd + c * T;
         elem_t       * yc = yd + c * T;
         for (int64_t t = 0; t < T; t++) {
-            const float xi = ggml_load_f32(xc[t]);
+            const float xi = snake_load(xc[t]);
             const float s  = sinf(ac * xi);
-            yc[t] = ggml_store_f32<elem_t>(xi + s * s * bc);
+            yc[t] = snake_store<elem_t>(xi + s * s * bc);
         }
     }
 }
