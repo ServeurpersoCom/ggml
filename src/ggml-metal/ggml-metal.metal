@@ -4894,10 +4894,11 @@ kernel void kernel_conv_transpose_1d<half>(
     uint3    tgpg[[threadgroups_per_grid]]);
 
 
+template <typename T>
 kernel void kernel_col2im_1d(
         constant ggml_metal_kargs_col2im_1d & args,
-        device const float * col,
-        device       float * dst,
+        device const T * col,
+        device       T * dst,
         uint3   tgpig[[threadgroup_position_in_grid]]) {
 
     const int t_out = tgpig[0];
@@ -4912,18 +4913,25 @@ kernel void kernel_col2im_1d(
     float sum = 0.0f;
     for (int t_in = t_in_min; t_in <= t_in_max; t_in++) {
         const int k = t_abs - t_in * args.s0;
-        sum += col[(oc * args.K + k) + t_in * args.K_OC];
+        sum += float(col[(oc * args.K + k) + t_in * args.K_OC]);
     }
 
-    dst[t_out + oc * args.T_out] = sum;
+    dst[t_out + oc * args.T_out] = T(sum);
 }
 
+typedef decltype(kernel_col2im_1d<float>) kernel_col2im_1d_t;
+
+template [[host_name("kernel_col2im_1d_f32")]]  kernel kernel_col2im_1d_t kernel_col2im_1d<float>;
+template [[host_name("kernel_col2im_1d_f16")]]  kernel kernel_col2im_1d_t kernel_col2im_1d<half>;
+template [[host_name("kernel_col2im_1d_bf16")]] kernel kernel_col2im_1d_t kernel_col2im_1d<bfloat>;
+
+template <typename T>
 kernel void kernel_snake(
         device const ggml_metal_kargs_snake & args [[buffer(0)]],
-        device const float * x      [[buffer(1)]],
+        device const T     * x      [[buffer(1)]],
         device const float * a      [[buffer(2)]],
         device const float * inv_b  [[buffer(3)]],
-        device       float * dst    [[buffer(4)]],
+        device       T     * dst    [[buffer(4)]],
         uint         tgpig [[threadgroup_position_in_grid]],
         uint         tpitg [[thread_position_in_threadgroup]],
         uint         ntg   [[threads_per_threadgroup]]) {
@@ -4931,10 +4939,16 @@ kernel void kernel_snake(
     if (idx >= args.T * args.C) return;
 
     const int c = idx / args.T;
-    const float xi = x[idx];
+    const float xi = float(x[idx]);
     const float s  = sin(a[c] * xi);
-    dst[idx] = xi + s * s * inv_b[c];
+    dst[idx] = T(xi + s * s * inv_b[c]);
 }
+
+typedef decltype(kernel_snake<float>) kernel_snake_t;
+
+template [[host_name("kernel_snake_f32")]]  kernel kernel_snake_t kernel_snake<float>;
+template [[host_name("kernel_snake_f16")]]  kernel kernel_snake_t kernel_snake<half>;
+template [[host_name("kernel_snake_bf16")]] kernel kernel_snake_t kernel_snake<bfloat>;
 
 typedef void (conv_transpose_2d_t)(
         constant ggml_metal_kargs_conv_transpose_2d & args,

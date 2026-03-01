@@ -1740,24 +1740,42 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_conv_transpose_1
 
 ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_col2im_1d(ggml_metal_library_t lib, const ggml_tensor * op) {
     assert(op->op == GGML_OP_COL2IM_1D);
-
     GGML_ASSERT(ggml_is_contiguous(op->src[0]));
-    GGML_ASSERT(op->src[0]->type == GGML_TYPE_F32);
-    GGML_ASSERT(op->type         == GGML_TYPE_F32);
 
-    ggml_metal_pipeline_with_params res = ggml_metal_library_get_pipeline(lib, "kernel_col2im_1d");
+    const char * suffix;
+    switch (op->src[0]->type) {
+        case GGML_TYPE_F32:  suffix = "f32";  break;
+        case GGML_TYPE_F16:  suffix = "f16";  break;
+        case GGML_TYPE_BF16: suffix = "bf16"; break;
+        default: GGML_ABORT("col2im_1d: unsupported type");
+    }
+
+    char name[64];
+    snprintf(name, sizeof(name), "kernel_col2im_1d_%s", suffix);
+
+    ggml_metal_pipeline_with_params res = ggml_metal_library_get_pipeline(lib, name);
     if (!res.pipeline) {
-        res = ggml_metal_library_compile_pipeline(lib, "kernel_col2im_1d", "kernel_col2im_1d", nullptr);
+        res = ggml_metal_library_compile_pipeline(lib, name, name, nullptr);
     }
 
     return res;
 }
 
 ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_snake(ggml_metal_library_t lib, const ggml_tensor * op) {
-    GGML_UNUSED(op);
-    ggml_metal_pipeline_with_params res = ggml_metal_library_get_pipeline(lib, "kernel_snake");
+    const char * suffix;
+    switch (op->src[0]->type) {
+        case GGML_TYPE_F32:  suffix = "f32";  break;
+        case GGML_TYPE_F16:  suffix = "f16";  break;
+        case GGML_TYPE_BF16: suffix = "bf16"; break;
+        default: GGML_ABORT("snake: unsupported type");
+    }
+
+    char name[64];
+    snprintf(name, sizeof(name), "kernel_snake_%s", suffix);
+
+    ggml_metal_pipeline_with_params res = ggml_metal_library_get_pipeline(lib, name);
     if (!res.pipeline) {
-        res = ggml_metal_library_compile_pipeline(lib, "kernel_snake", "kernel_snake", nullptr);
+        res = ggml_metal_library_compile_pipeline(lib, name, name, nullptr);
     }
     return res;
 }

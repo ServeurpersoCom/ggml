@@ -4476,6 +4476,7 @@ struct ggml_tensor * ggml_col2im_1d(
         int                   oc,
         int                   p0) {
     GGML_ASSERT(ggml_is_matrix(a));
+    GGML_ASSERT(a->type == GGML_TYPE_F32 || a->type == GGML_TYPE_F16 || a->type == GGML_TYPE_BF16);
 
     const int64_t K_OC = a->ne[0];
     const int64_t T_in = a->ne[1];
@@ -4486,7 +4487,7 @@ struct ggml_tensor * ggml_col2im_1d(
     GGML_ASSERT(K > 0 && T_out > 0);
 
     const int64_t ne[4] = { T_out, oc, 1, 1 };
-    struct ggml_tensor * result = ggml_new_tensor(ctx, GGML_TYPE_F32, 2, ne);
+    struct ggml_tensor * result = ggml_new_tensor(ctx, a->type, 2, ne);
 
     int32_t params[] = { s0, (int32_t)oc, (int32_t)p0 };
     ggml_set_op_params(result, params, sizeof(params));
@@ -4505,8 +4506,9 @@ struct ggml_tensor * ggml_snake(
         struct ggml_tensor  * a,
         struct ggml_tensor  * inv_b) {
     // x: [T, C], a: [1,C] or [C], inv_b: [1,C] or [C]
-    // output: [T, C] same shape as x
-    struct ggml_tensor * result = ggml_new_tensor(ctx, GGML_TYPE_F32, GGML_MAX_DIMS, x->ne);
+    // output: [T, C] same shape and type as x (F32, F16, or BF16)
+    GGML_ASSERT(x->type == GGML_TYPE_F32 || x->type == GGML_TYPE_F16 || x->type == GGML_TYPE_BF16);
+    struct ggml_tensor * result = ggml_new_tensor(ctx, x->type, GGML_MAX_DIMS, x->ne);
 
     result->op     = GGML_OP_SNAKE;
     result->src[0] = x;

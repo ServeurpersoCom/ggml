@@ -6650,19 +6650,31 @@ static inline int64_t ggml_wrap_around(int64_t coord, int64_t size) {
     return (coord  + size) % size; // adding size avoids negative number weirdness
 }
 
+// Type-generic load/store helpers for F32, F16, BF16 custom ops (snake, col2im_1d)
+template <typename T_type>
+static inline float ggml_load_f32(T_type x);
+template <> inline float ggml_load_f32(float x)       { return x; }
+template <> inline float ggml_load_f32(ggml_fp16_t x) { return GGML_FP16_TO_FP32(x); }
+template <> inline float ggml_load_f32(ggml_bf16_t x) { return GGML_BF16_TO_FP32(x); }
+
+template <typename T_type>
+static inline T_type ggml_store_f32(float x);
+template <> inline float       ggml_store_f32<float>(float x)       { return x; }
+template <> inline ggml_fp16_t ggml_store_f32<ggml_fp16_t>(float x) { return GGML_FP32_TO_FP16(x); }
+template <> inline ggml_bf16_t ggml_store_f32<ggml_bf16_t>(float x) { return GGML_FP32_TO_BF16(x); }
+
 // ggml_compute_forward_col2im_1d
 //
 // Scatter-add columns [K*OC, T_in] -> signal [T_out, OC]
 // where T_out = (T_in - 1)*s + K.  Gather approach: each output reads ceil(K/s) inputs.
+// Supports F32, F16, BF16 input/output (same type), F32 accumulator.
 
-void ggml_compute_forward_col2im_1d(
+template <typename elem_t>
+static void ggml_compute_forward_col2im_1d_impl(
         const ggml_compute_params * params,
         ggml_tensor * dst) {
 
     const ggml_tensor * src = dst->src[0];  // [K*OC, T_in]
-
-    GGML_ASSERT(src->type == GGML_TYPE_F32);
-    GGML_ASSERT(dst->type == GGML_TYPE_F32);
 
     const int32_t s0 = ((const int32_t *)(dst->op_params))[0];
     const int32_t OC = ((const int32_t *)(dst->op_params))[1];
@@ -6673,8 +6685,8 @@ void ggml_compute_forward_col2im_1d(
     const int64_t K    = K_OC / OC;
     const int64_t T_out = dst->ne[0];
 
-    const float * col_data = (const float *) src->data;
-    float       * dst_data = (float *)       dst->data;
+    const elem_t * col_data = (const elem_t *) src->data;
+    elem_t       * dst_data = (elem_t *) dst->data;
 
     const int ith = params->ith;
     const int nth = params->nth;
@@ -6699,19 +6711,31 @@ void ggml_compute_forward_col2im_1d(
                 int64_t k = t_abs - t_in * s0;
                 if (k >= 0 && k < K) {
                     // col layout: [K*OC, T_in], element (oc*K+k, t_in)
-                    sum += col_data[(oc * K + k) + t_in * K_OC];
+                    sum += ggml_load_f32(col_data[(oc * K + k) + t_in * K_OC]);
                 }
             }
             // dst layout: [T_out, OC], element (t_out, oc)
-            dst_data[t_out + oc * T_out] = sum;
+            dst_data[t_out + oc * T_out] = ggml_store_f32<elem_t>(sum);
         }
+    }
+}
+
+void ggml_compute_forward_col2im_1d(
+        const ggml_compute_params * params,
+        ggml_tensor * dst) {
+    switch (dst->src[0]->type) {
+        case GGML_TYPE_F32:  ggml_compute_forward_col2im_1d_impl<float>      (params, dst); break;
+        case GGML_TYPE_F16:  ggml_compute_forward_col2im_1d_impl<ggml_fp16_t>(params, dst); break;
+        case GGML_TYPE_BF16: ggml_compute_forward_col2im_1d_impl<ggml_bf16_t>(params, dst); break;
+        default: GGML_ABORT("col2im_1d: unsupported type %d", dst->src[0]->type);
     }
 }
 
 // ggml_compute_forward_snake
 // Fused: y = x + sin^2(a * x) * inv_b
-
-void ggml_compute_forward_snake(
+// Supports F32, F16, BF16 input/output (same type), params always F32.
+template <typename elem_t>
+static void ggml_compute_forward_snake_impl(
         const struct ggml_compute_params * params,
         struct ggml_tensor * dst) {
     const struct ggml_tensor * src0 = dst->src[0]; // x: [T, C]
@@ -6721,10 +6745,10 @@ void ggml_compute_forward_snake(
     const int64_t T = src0->ne[0];
     const int64_t C = src0->ne[1];
 
-    const float * xd = (const float *)src0->data;
-    const float * ad = (const float *)src1->data;
-    const float * bd = (const float *)src2->data;
-    float       * yd = (float       *)dst->data;
+    const elem_t * xd = (const elem_t *)src0->data;
+    const float  * ad = (const float  *)src1->data;
+    const float  * bd = (const float  *)src2->data;
+    elem_t       * yd = (elem_t       *)dst->data;
 
     const int ith = params->ith;
     const int nth = params->nth;
@@ -6732,13 +6756,24 @@ void ggml_compute_forward_snake(
     for (int64_t c = ith; c < C; c += nth) {
         const float ac = ad[c];
         const float bc = bd[c];
-        const float * xc = xd + c * T;
-        float       * yc = yd + c * T;
+        const elem_t * xc = xd + c * T;
+        elem_t       * yc = yd + c * T;
         for (int64_t t = 0; t < T; t++) {
-            const float xi = xc[t];
+            const float xi = ggml_load_f32(xc[t]);
             const float s  = sinf(ac * xi);
-            yc[t] = xi + s * s * bc;
+            yc[t] = ggml_store_f32<elem_t>(xi + s * s * bc);
         }
+    }
+}
+
+void ggml_compute_forward_snake(
+        const struct ggml_compute_params * params,
+        struct ggml_tensor * dst) {
+    switch (dst->src[0]->type) {
+        case GGML_TYPE_F32:  ggml_compute_forward_snake_impl<float>      (params, dst); break;
+        case GGML_TYPE_F16:  ggml_compute_forward_snake_impl<ggml_fp16_t>(params, dst); break;
+        case GGML_TYPE_BF16: ggml_compute_forward_snake_impl<ggml_bf16_t>(params, dst); break;
+        default: GGML_ABORT("snake: unsupported type %d", dst->src[0]->type);
     }
 }
 

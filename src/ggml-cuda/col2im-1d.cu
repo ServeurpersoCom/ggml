@@ -2,10 +2,24 @@
 
 // col2im_1d: scatter-add GEMM columns to 1D signal (gather approach)
 // columns: [K*OC, T_in]  ->  output: [T_out, OC]
-// Each output element gathers ceil(K/s) values - typically 2 for our VAE.
+// Supports F32, F16, BF16 data with F32 accumulator.
+
+template <typename T>
+static __device__ __forceinline__ float c2i_load(T x);
+template <> __device__ __forceinline__ float c2i_load(float x)          { return x; }
+template <> __device__ __forceinline__ float c2i_load(half x)           { return __half2float(x); }
+template <> __device__ __forceinline__ float c2i_load(nv_bfloat16 x)    { return __bfloat162float(x); }
+
+template <typename T>
+static __device__ __forceinline__ T c2i_store(float x);
+template <> __device__ __forceinline__ float       c2i_store<float>(float x)       { return x; }
+template <> __device__ __forceinline__ half        c2i_store<half>(float x)        { return __float2half(x); }
+template <> __device__ __forceinline__ nv_bfloat16 c2i_store<nv_bfloat16>(float x) { return __float2bfloat16(x); }
+
+template <typename T>
 static __global__ void col2im_1d_kernel(
-        const float * __restrict__ col,
-        float * __restrict__ dst,
+        const T * __restrict__ col,
+        T       * __restrict__ dst,
         const int T_in, const int T_out,
         const int OC, const int K, const int K_OC,
         const int s0, const int p0, const int total) {
@@ -13,7 +27,7 @@ static __global__ void col2im_1d_kernel(
     const int idx = threadIdx.x + blockIdx.x * blockDim.x;
     if (idx >= total) return;
 
-    // dst layout: [T_out, OC] - ne[0]=T_out fastest
+    // dst layout: [T_out, OC], ne[0]=T_out fastest
     const int t_out = idx % T_out;
     const int oc    = idx / T_out;
     const int t_abs = t_out + p0;  // absolute position in uncropped signal
@@ -27,21 +41,17 @@ static __global__ void col2im_1d_kernel(
     float sum = 0.0f;
     for (int t_in = t_in_min; t_in <= t_in_max; t_in++) {
         const int k = t_abs - t_in * s0;
-        // col layout: [K*OC, T_in] - ne[0]=K*OC, order oc*K+k (K fastest)
-        sum += col[(oc * K + k) + t_in * K_OC];
+        // col layout: [K*OC, T_in], column index = oc * K + k
+        sum += c2i_load(col[(oc * K + k) + t_in * K_OC]);
     }
 
-    dst[idx] = sum;
+    dst[idx] = c2i_store<T>(sum);
 }
 
 void ggml_cuda_op_col2im_1d(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
     const ggml_tensor * src0 = dst->src[0];
-    const float * src0_d = (const float *) src0->data;
-    float * dst_d = (float *) dst->data;
     cudaStream_t stream = ctx.stream();
 
-    GGML_ASSERT(src0->type == GGML_TYPE_F32);
-    GGML_ASSERT(dst->type  == GGML_TYPE_F32);
     GGML_ASSERT(ggml_is_contiguous(src0));
 
     const int32_t s0 = ((const int32_t *)(dst->op_params))[0];
@@ -57,6 +67,23 @@ void ggml_cuda_op_col2im_1d(ggml_backend_cuda_context & ctx, ggml_tensor * dst) 
     const int block_size = 256;
     const int num_blocks = (total + block_size - 1) / block_size;
 
-    col2im_1d_kernel<<<num_blocks, block_size, 0, stream>>>(
-        src0_d, dst_d, T_in, T_out, OC, K, K_OC, s0, p0, total);
+    switch (src0->type) {
+        case GGML_TYPE_F32: {
+            col2im_1d_kernel<<<num_blocks, block_size, 0, stream>>>(
+                (const float *)src0->data, (float *)dst->data,
+                T_in, T_out, OC, K, K_OC, s0, p0, total);
+        } break;
+        case GGML_TYPE_F16: {
+            col2im_1d_kernel<<<num_blocks, block_size, 0, stream>>>(
+                (const half *)src0->data, (half *)dst->data,
+                T_in, T_out, OC, K, K_OC, s0, p0, total);
+        } break;
+        case GGML_TYPE_BF16: {
+            col2im_1d_kernel<<<num_blocks, block_size, 0, stream>>>(
+                (const nv_bfloat16 *)src0->data, (nv_bfloat16 *)dst->data,
+                T_in, T_out, OC, K, K_OC, s0, p0, total);
+        } break;
+        default:
+            GGML_ABORT("col2im_1d: unsupported type");
+    }
 }

@@ -839,7 +839,11 @@ struct vk_device_struct {
     vk_pipeline pipeline_timestep_embedding_f32;
     vk_pipeline pipeline_conv_transpose_1d_f32;
     vk_pipeline pipeline_col2im_1d_f32;
+    vk_pipeline pipeline_col2im_1d_f16;
+    vk_pipeline pipeline_col2im_1d_bf16;
     vk_pipeline pipeline_snake_f32;
+    vk_pipeline pipeline_snake_f16;
+    vk_pipeline pipeline_snake_bf16;
     vk_pipeline pipeline_pool2d_f32;
     vk_pipeline pipeline_rwkv_wkv6_f32;
     vk_pipeline pipeline_rwkv_wkv7_f32;
@@ -4720,9 +4724,13 @@ static void ggml_vk_load_shaders(vk_device& device) {
 
     ggml_vk_create_pipeline(device, device->pipeline_conv_transpose_1d_f32, "conv_transpose_1d_f32", conv_transpose_1d_f32_len, conv_transpose_1d_f32_data, "main", 3, sizeof(vk_op_conv_transpose_1d_push_constants), {1, 1, 1}, {}, 1);
 
-    ggml_vk_create_pipeline(device, device->pipeline_col2im_1d_f32, "col2im_1d_f32", col2im_1d_f32_len, col2im_1d_f32_data, "main", 2, sizeof(vk_op_col2im_1d_push_constants), {256, 1, 1}, {}, 1);
+    ggml_vk_create_pipeline(device, device->pipeline_col2im_1d_f32,  "col2im_1d_f32",  col2im_1d_f32_len,  col2im_1d_f32_data,  "main", 2, sizeof(vk_op_col2im_1d_push_constants), {256, 1, 1}, {}, 1);
+    ggml_vk_create_pipeline(device, device->pipeline_col2im_1d_f16,  "col2im_1d_f16",  col2im_1d_f16_len,  col2im_1d_f16_data,  "main", 2, sizeof(vk_op_col2im_1d_push_constants), {256, 1, 1}, {}, 1);
+    ggml_vk_create_pipeline(device, device->pipeline_col2im_1d_bf16, "col2im_1d_bf16", col2im_1d_bf16_len, col2im_1d_bf16_data, "main", 2, sizeof(vk_op_col2im_1d_push_constants), {256, 1, 1}, {}, 1);
 
-    ggml_vk_create_pipeline(device, device->pipeline_snake_f32, "snake_f32", snake_f32_len, snake_f32_data, "main", 4, sizeof(vk_op_snake_push_constants), {256, 1, 1}, {}, 1);
+    ggml_vk_create_pipeline(device, device->pipeline_snake_f32,  "snake_f32",  snake_f32_len,  snake_f32_data,  "main", 4, sizeof(vk_op_snake_push_constants), {256, 1, 1}, {}, 1);
+    ggml_vk_create_pipeline(device, device->pipeline_snake_f16,  "snake_f16",  snake_f16_len,  snake_f16_data,  "main", 4, sizeof(vk_op_snake_push_constants), {256, 1, 1}, {}, 1);
+    ggml_vk_create_pipeline(device, device->pipeline_snake_bf16, "snake_bf16", snake_bf16_len, snake_bf16_data, "main", 4, sizeof(vk_op_snake_push_constants), {256, 1, 1}, {}, 1);
 
     ggml_vk_create_pipeline(device, device->pipeline_pool2d_f32, "pool2d_f32", pool2d_f32_len, pool2d_f32_data, "main", 2, sizeof(vk_op_pool2d_push_constants), {512, 1, 1}, {}, 1);
 
@@ -9739,15 +9747,17 @@ static vk_pipeline ggml_vk_op_get_pipeline(ggml_backend_vk_context * ctx, const 
         }
         return nullptr;
     case GGML_OP_COL2IM_1D:
-        if (src0->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32) {
-            return ctx->device->pipeline_col2im_1d_f32;
+        switch (src0->type) {
+            case GGML_TYPE_F16:  return ctx->device->pipeline_col2im_1d_f16;
+            case GGML_TYPE_BF16: return ctx->device->pipeline_col2im_1d_bf16;
+            default:             return ctx->device->pipeline_col2im_1d_f32;
         }
-        return nullptr;
     case GGML_OP_SNAKE:
-        if (src0->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32) {
-            return ctx->device->pipeline_snake_f32;
+        switch (src0->type) {
+            case GGML_TYPE_F16:  return ctx->device->pipeline_snake_f16;
+            case GGML_TYPE_BF16: return ctx->device->pipeline_snake_bf16;
+            default:             return ctx->device->pipeline_snake_f32;
         }
-        return nullptr;
     case GGML_OP_POOL_2D:
         if (src0->type == GGML_TYPE_F32 && dst->type == GGML_TYPE_F32) {
             return ctx->device->pipeline_pool2d_f32;
@@ -11918,9 +11928,6 @@ static void ggml_vk_snake(ggml_backend_vk_context * ctx, vk_context& subctx, con
     // src0: x [T, C], src1: a [C], src2: inv_b [C]
     // dst: y [T, C] = x + sin^2(a*x) * inv_b
 
-    GGML_ASSERT(src0->type == GGML_TYPE_F32);
-    GGML_ASSERT( dst->type == GGML_TYPE_F32);
-
     const uint32_t T = static_cast<uint32_t>(src0->ne[0]);
     const uint32_t C = static_cast<uint32_t>(src0->ne[1]);
 
@@ -11934,9 +11941,6 @@ static void ggml_vk_snake(ggml_backend_vk_context * ctx, vk_context& subctx, con
 static void ggml_vk_col2im_1d(ggml_backend_vk_context * ctx, vk_context& subctx, const ggml_tensor * src0, ggml_tensor * dst) {
     // src0: [K_OC, T_in] columns from matmul
     // dst:  [T_out, OC]
-
-    GGML_ASSERT(src0->type == GGML_TYPE_F32);
-    GGML_ASSERT( dst->type == GGML_TYPE_F32);
 
     const int32_t stride = dst->op_params[0];
     const int32_t oc     = dst->op_params[1];
@@ -15950,9 +15954,10 @@ static bool ggml_backend_vk_device_supports_op(ggml_backend_dev_t dev, const ggm
         case GGML_OP_CONV_TRANSPOSE_1D:
             return op->src[0]->type == GGML_TYPE_F32 && op->src[1]->type == GGML_TYPE_F32;
         case GGML_OP_COL2IM_1D:
-            return op->src[0]->type == GGML_TYPE_F32;
         case GGML_OP_SNAKE:
-            return op->src[0]->type == GGML_TYPE_F32;
+            return op->src[0]->type == GGML_TYPE_F32 ||
+                   op->src[0]->type == GGML_TYPE_F16 ||
+                   op->src[0]->type == GGML_TYPE_BF16;
         case GGML_OP_CONV_2D:
         case GGML_OP_CONV_TRANSPOSE_2D:
             {

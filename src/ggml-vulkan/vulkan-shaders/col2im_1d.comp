@@ -17,6 +17,24 @@ layout (push_constant) uniform parameter {
     int32_t  p0;
 } p;
 
+// Load A_TYPE to float
+float load_col(uint32_t idx) {
+#if defined(DATA_A_BF16)
+    return bf16_to_fp32(uint32_t(data_a[idx]));
+#else
+    return float(data_a[idx]);
+#endif
+}
+
+// Store float as D_TYPE
+void store_dst(uint32_t idx, float v) {
+#if defined(DATA_A_BF16)
+    data_d[idx] = D_TYPE(fp32_to_bf16(v));
+#else
+    data_d[idx] = D_TYPE(v);
+#endif
+}
+
 void main() {
     const uint32_t t_out = gl_GlobalInvocationID.x;
     const uint32_t oc    = gl_GlobalInvocationID.y;
@@ -32,11 +50,11 @@ void main() {
         uint32_t t_in = uint32_t(t_shifted / p.stride);
         if (t_in >= p.T_in) continue;
 
-        // col layout: [K_OC, T_in], column index = oc * K + k (GGML natural order)
+        // col layout: [K_OC, T_in], column index = oc * K + k
         uint32_t col_idx = (oc * p.K + k) + t_in * p.K_OC;
-        val += data_a[col_idx];
+        val += load_col(col_idx);
     }
 
     // dst layout: [T_out, OC], element (t_out, oc) = t_out + oc * T_out
-    data_d[t_out + oc * p.T_out] = val;
+    store_dst(t_out + oc * p.T_out, val);
 }
