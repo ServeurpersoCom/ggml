@@ -1701,10 +1701,16 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_im2col(ggml_meta
     GGML_ASSERT(op->src[1]->type == GGML_TYPE_F32);
     GGML_ASSERT(op->type         == GGML_TYPE_F16 || op->type == GGML_TYPE_F32);
 
+    const bool is_2D = ((const int32_t *)(op->op_params))[6] == 1;
+
     char base[256];
     char name[256];
 
-    snprintf(base, 256, "kernel_im2col_%s", ggml_type_name(op->type));
+    if (is_2D) {
+        snprintf(base, 256, "kernel_im2col_%s", ggml_type_name(op->type));
+    } else {
+        snprintf(base, 256, "kernel_im2col_1d_%s", ggml_type_name(op->type));
+    }
     snprintf(name, 256, "%s", base);
 
     ggml_metal_pipeline_with_params res = ggml_metal_library_get_pipeline(lib, name);

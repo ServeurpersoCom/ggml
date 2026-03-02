@@ -3590,60 +3590,97 @@ int ggml_metal_op_im2col(ggml_metal_op_t ctx, int idx) {
     GGML_TENSOR_LOCALS(uint64_t, nb,  op,         nb);
 
     const int32_t s0 = ((const int32_t *)(op->op_params))[0];
-    const int32_t s1 = ((const int32_t *)(op->op_params))[1];
     const int32_t p0 = ((const int32_t *)(op->op_params))[2];
-    const int32_t p1 = ((const int32_t *)(op->op_params))[3];
     const int32_t d0 = ((const int32_t *)(op->op_params))[4];
-    const int32_t d1 = ((const int32_t *)(op->op_params))[5];
 
     const bool is_2D = ((const int32_t *)(op->op_params))[6] == 1;
 
-    const int32_t N  = op->src[1]->ne[is_2D ? 3 : 2];
-    const int32_t IC = op->src[1]->ne[is_2D ? 2 : 1];
-    const int32_t IH = is_2D ? op->src[1]->ne[1] : 1;
-    const int32_t IW =         op->src[1]->ne[0];
-
-    const int32_t KH = is_2D ? op->src[0]->ne[1] : 1;
-    const int32_t KW =         op->src[0]->ne[0];
-
-    const int32_t OH = is_2D ? op->ne[2] : 1;
-    const int32_t OW =         op->ne[1];
-
-    const int32_t CHW = IC * KH * KW;
-
-    const uint64_t ofs0 = op->src[1]->nb[is_2D ? 3 : 2] / 4;
-    const uint64_t ofs1 = op->src[1]->nb[is_2D ? 2 : 1] / 4;
-
-    ggml_metal_kargs_im2col args = {
-        /*.ofs0 =*/ ofs0,
-        /*.ofs1 =*/ ofs1,
-        /*.IW   =*/ IW,
-        /*.IH   =*/ IH,
-        /*.CHW  =*/ CHW,
-        /*.s0   =*/ s0,
-        /*.s1   =*/ s1,
-        /*.p0   =*/ p0,
-        /*.p1   =*/ p1,
-        /*.d0   =*/ d0,
-        /*.d1   =*/ d1,
-        /*.N    =*/ N,
-        /*.KH   =*/ KH,
-        /*.KW   =*/ KW,
-        /*.KHW  =*/ KH * KW,
-    };
-
+    // pipeline getter already picks kernel_im2col vs kernel_im2col_1d
     auto pipeline = ggml_metal_library_get_pipeline_im2col(lib, op);
 
-    GGML_ASSERT(KH*KW <= ggml_metal_pipeline_max_theads_per_threadgroup(pipeline));
+    if (!is_2D) {
+        // 1D fast path: flat dispatch, full SIMD utilization
+        const int32_t N  = op->src[1]->ne[2];
+        const int32_t IC = op->src[1]->ne[1];
+        const int32_t IW = op->src[1]->ne[0];
+        const int32_t KW = op->src[0]->ne[0];
+        const int32_t OW = op->ne[1];
 
-    const uint64_t ntptg0 = std::min(ggml_metal_pipeline_max_theads_per_threadgroup(pipeline)/(KH*KW), N);
+        const uint64_t ofs0 = op->src[1]->nb[2] / 4;
+        const uint64_t ofs1 = op->src[1]->nb[1] / 4;
 
-    ggml_metal_encoder_set_pipeline(enc, pipeline);
-    ggml_metal_encoder_set_bytes   (enc, &args, sizeof(args), 0);
-    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(op->src[1]), 1);
-    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(op),         2);
+        ggml_metal_kargs_im2col_1d args = {
+            /*.ofs0 =*/ ofs0,
+            /*.ofs1 =*/ ofs1,
+            /*.IW   =*/ IW,
+            /*.OW   =*/ OW,
+            /*.IC   =*/ IC,
+            /*.K    =*/ KW,
+            /*.CHW  =*/ IC * KW,
+            /*.s0   =*/ s0,
+            /*.p0   =*/ p0,
+            /*.d0   =*/ d0,
+            /*.N    =*/ N,
+        };
 
-    ggml_metal_encoder_dispatch_threadgroups(enc, IC, OH, OW, ntptg0, KH, KW);
+        const int total = N * OW * IC * KW;
+        const int nth = 256;
+        const int ntg = (total + nth - 1) / nth;
+
+        ggml_metal_encoder_set_pipeline(enc, pipeline);
+        ggml_metal_encoder_set_bytes   (enc, &args, sizeof(args), 0);
+        ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(op->src[1]), 1);
+        ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(op),         2);
+
+        ggml_metal_encoder_dispatch_threadgroups(enc, ntg, 1, 1, nth, 1, 1);
+    } else {
+        // 2D path: original 3D grid dispatch
+        const int32_t s1 = ((const int32_t *)(op->op_params))[1];
+        const int32_t p1 = ((const int32_t *)(op->op_params))[3];
+        const int32_t d1 = ((const int32_t *)(op->op_params))[5];
+
+        const int32_t N  = op->src[1]->ne[3];
+        const int32_t IC = op->src[1]->ne[2];
+        const int32_t IH = op->src[1]->ne[1];
+        const int32_t IW = op->src[1]->ne[0];
+        const int32_t KH = op->src[0]->ne[1];
+        const int32_t KW = op->src[0]->ne[0];
+        const int32_t OH = op->ne[2];
+        const int32_t OW = op->ne[1];
+        const int32_t CHW = IC * KH * KW;
+
+        const uint64_t ofs0 = op->src[1]->nb[3] / 4;
+        const uint64_t ofs1 = op->src[1]->nb[2] / 4;
+
+        ggml_metal_kargs_im2col args = {
+            /*.ofs0 =*/ ofs0,
+            /*.ofs1 =*/ ofs1,
+            /*.IW   =*/ IW,
+            /*.IH   =*/ IH,
+            /*.CHW  =*/ CHW,
+            /*.s0   =*/ s0,
+            /*.s1   =*/ s1,
+            /*.p0   =*/ p0,
+            /*.p1   =*/ p1,
+            /*.d0   =*/ d0,
+            /*.d1   =*/ d1,
+            /*.N    =*/ N,
+            /*.KH   =*/ KH,
+            /*.KW   =*/ KW,
+            /*.KHW  =*/ KH * KW,
+        };
+
+        GGML_ASSERT(KH*KW <= ggml_metal_pipeline_max_theads_per_threadgroup(pipeline));
+
+        const uint64_t ntptg0 = std::min(ggml_metal_pipeline_max_theads_per_threadgroup(pipeline)/(KH*KW), N);
+
+        ggml_metal_encoder_set_pipeline(enc, pipeline);
+        ggml_metal_encoder_set_bytes   (enc, &args, sizeof(args), 0);
+        ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(op->src[1]), 1);
+        ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(op),         2);
+
+        ggml_metal_encoder_dispatch_threadgroups(enc, IC, OH, OW, ntptg0, KH, KW);
+    }
 
     return 1;
 }

@@ -715,6 +715,21 @@ typedef struct {
     uint64_t nb3;
 } ggml_metal_kargs_conv_3d;
 
+// im2col specialized for 1D convolutions (flat dispatch, full SIMD utilization)
+typedef struct {
+    uint64_t ofs0;   // batch stride in src (floats)
+    uint64_t ofs1;   // channel stride in src (floats)
+    int32_t  IW;     // input width
+    int32_t  OW;     // output width
+    int32_t  IC;     // input channels
+    int32_t  K;      // kernel size
+    int32_t  CHW;    // IC * K (pre-computed)
+    int32_t  s0;     // stride
+    int32_t  p0;     // padding
+    int32_t  d0;     // dilation
+    int32_t  N;      // batch size
+} ggml_metal_kargs_im2col_1d;
+
 typedef struct{
     int32_t  ne00;
     uint64_t nb01;

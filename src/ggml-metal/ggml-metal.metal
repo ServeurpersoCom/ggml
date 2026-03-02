@@ -4665,7 +4665,43 @@ kernel void kernel_im2col(
 template [[host_name("kernel_im2col_f32")]] kernel im2col_t kernel_im2col<float>;
 template [[host_name("kernel_im2col_f16")]] kernel im2col_t kernel_im2col<half>;
 
-// TODO: obsolete -- remove
+// im2col specialized for 1D convolutions
+// Flat dispatch (like snake/col2im_1d) instead of 3D grid.
+// One thread per output element -> full SIMD utilization.
+// The generic 2D kernel dispatches (IC, 1, OW) threadgroups with K threads each,
+// wasting 78-97% of SIMD lanes for small K (1 or 7).
+template <typename T>
+kernel void kernel_im2col_1d(
+        constant ggml_metal_kargs_im2col_1d & args,
+        device const float * src,
+        device             T * dst,
+        uint tgpig [[threadgroup_position_in_grid]],
+        uint tpitg [[thread_position_in_threadgroup]],
+        uint   ntg [[threads_per_threadgroup]]) {
+
+    const int idx = tgpig * ntg + tpitg;
+    const int total = args.N * args.OW * args.CHW;
+    if (idx >= total) return;
+
+    // decompose flat index -> (n, ow, ic, k)
+    const int k  = idx % args.K;
+    const int ic = (idx / args.K) % args.IC;
+    const int ow = (idx / args.CHW) % args.OW;
+    const int n  = idx / (args.OW * args.CHW);
+
+    const int iw = ow * args.s0 + k * args.d0 - args.p0;
+
+    if (iw >= 0 && iw < args.IW) {
+        dst[idx] = T(src[n * args.ofs0 + ic * args.ofs1 + iw]);
+    } else {
+        dst[idx] = T(0);
+    }
+}
+
+template [[host_name("kernel_im2col_1d_f32")]] kernel void kernel_im2col_1d<float>(constant ggml_metal_kargs_im2col_1d &, device const float *, device float *, uint, uint, uint);
+template [[host_name("kernel_im2col_1d_f16")]] kernel void kernel_im2col_1d<half>(constant ggml_metal_kargs_im2col_1d &, device const float *, device half *, uint, uint, uint);
+
+// TODO: obolete -- remove
 //typedef void (im2col_ext_t)(
 //        constant ggml_metal_kargs_im2col & args,
 //        device const float * x,
