@@ -6732,22 +6732,23 @@ void ggml_compute_forward_col2im_1d(
 }
 
 // ggml_compute_forward_snake
-// Fused: y = x + sin^2(a * x) * inv_b
-// Supports F32, F16, BF16 input/output (same type), params always F32.
+// Fused snake activation: y = x + sin^2(a * x) * inv_b.
+// Inputs are extracted by the autofuse pass from the naive
+// mul -> sin -> sqr -> mul -> add chain in the graph.
+// Supports F32, F16, BF16 for x and dst, params always F32.
 template <typename elem_t>
-static void ggml_compute_forward_snake_impl(
+static void ggml_compute_forward_snake_fused_impl(
         const struct ggml_compute_params * params,
+        const struct ggml_tensor * x,
+        const struct ggml_tensor * a,
+        const struct ggml_tensor * inv_b,
         struct ggml_tensor * dst) {
-    const struct ggml_tensor * src0 = dst->src[0]; // x: [T, C]
-    const struct ggml_tensor * src1 = dst->src[1]; // a: [1, C] or [C]
-    const struct ggml_tensor * src2 = dst->src[2]; // inv_b: [1, C] or [C]
+    const int64_t T = x->ne[0];
+    const int64_t C = x->ne[1];
 
-    const int64_t T = src0->ne[0];
-    const int64_t C = src0->ne[1];
-
-    const elem_t * xd = (const elem_t *)src0->data;
-    const float  * ad = (const float  *)src1->data;
-    const float  * bd = (const float  *)src2->data;
+    const elem_t * xd = (const elem_t *)x->data;
+    const float  * ad = (const float  *)a->data;
+    const float  * bd = (const float  *)inv_b->data;
     elem_t       * yd = (elem_t       *)dst->data;
 
     const int ith = params->ith;
@@ -6766,14 +6767,17 @@ static void ggml_compute_forward_snake_impl(
     }
 }
 
-void ggml_compute_forward_snake(
+void ggml_compute_forward_snake_fused(
         const struct ggml_compute_params * params,
+        const struct ggml_tensor * x,
+        const struct ggml_tensor * a,
+        const struct ggml_tensor * inv_b,
         struct ggml_tensor * dst) {
-    switch (dst->src[0]->type) {
-        case GGML_TYPE_F32:  ggml_compute_forward_snake_impl<float>      (params, dst); break;
-        case GGML_TYPE_F16:  ggml_compute_forward_snake_impl<ggml_fp16_t>(params, dst); break;
-        case GGML_TYPE_BF16: ggml_compute_forward_snake_impl<ggml_bf16_t>(params, dst); break;
-        default: GGML_ABORT("snake: unsupported type %d", dst->src[0]->type);
+    switch (x->type) {
+        case GGML_TYPE_F32:  ggml_compute_forward_snake_fused_impl<float>      (params, x, a, inv_b, dst); break;
+        case GGML_TYPE_F16:  ggml_compute_forward_snake_fused_impl<ggml_fp16_t>(params, x, a, inv_b, dst); break;
+        case GGML_TYPE_BF16: ggml_compute_forward_snake_fused_impl<ggml_bf16_t>(params, x, a, inv_b, dst); break;
+        default: GGML_ABORT("snake: unsupported type %d", x->type);
     }
 }
 

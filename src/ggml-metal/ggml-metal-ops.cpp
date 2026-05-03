@@ -269,10 +269,36 @@ static int ggml_metal_op_encode_impl(ggml_metal_op_t ctx, int idx) {
             } break;
         case GGML_OP_ADD:
         case GGML_OP_SUB:
-        case GGML_OP_MUL:
         case GGML_OP_DIV:
             {
                 n_fuse = ggml_metal_op_bin(ctx, idx);
+            } break;
+        case GGML_OP_MUL:
+            {
+                // Snake activation autofuse: mul -> sin -> sqr -> mul -> add
+                bool fused = false;
+                if (ctx->use_fusion) {
+                    const ggml_op snake_ops[5] = { GGML_OP_MUL, GGML_OP_SIN, GGML_OP_SQR, GGML_OP_MUL, GGML_OP_ADD };
+                    if (ctx->can_fuse(idx, snake_ops, 5)) {
+                        const ggml_tensor * mul0 = ctx->node(idx + 0);
+                        const ggml_tensor * sqr  = ctx->node(idx + 2);
+                        const ggml_tensor * mul1 = ctx->node(idx + 3);
+                        const ggml_tensor * add  = ctx->node(idx + 4);
+                        const ggml_tensor * x = ggml_are_same_shape(mul0, mul0->src[0]) ? mul0->src[0] : mul0->src[1];
+                        const ggml_tensor * a = (x == mul0->src[0]) ? mul0->src[1] : mul0->src[0];
+                        const ggml_tensor * inv_b    = (mul1->src[0] == sqr) ? mul1->src[1] : mul1->src[0];
+                        const ggml_tensor * x_in_add = (add->src[0] == mul1) ? add->src[1] : add->src[0];
+                        const bool type_ok  = (x->type == GGML_TYPE_F32 || x->type == GGML_TYPE_F16 || x->type == GGML_TYPE_BF16);
+                        const bool shape_ok = ggml_are_same_shape(a, inv_b) && a->ne[0] == 1 && a->ne[1] == x->ne[1];
+                        if (type_ok && shape_ok && x_in_add == x) {
+                            n_fuse = ggml_metal_op_snake_fused(ctx, idx);
+                            fused = true;
+                        }
+                    }
+                }
+                if (!fused) {
+                    n_fuse = ggml_metal_op_bin(ctx, idx);
+                }
             } break;
         case GGML_OP_ADD_ID:
             {
@@ -393,10 +419,6 @@ static int ggml_metal_op_encode_impl(ggml_metal_op_t ctx, int idx) {
         case GGML_OP_COL2IM_1D:
             {
                 n_fuse = ggml_metal_op_col2im_1d(ctx, idx);
-            } break;
-        case GGML_OP_SNAKE:
-            {
-                n_fuse = ggml_metal_op_snake(ctx, idx);
             } break;
         case GGML_OP_CONV_TRANSPOSE_2D:
             {
@@ -3882,36 +3904,44 @@ int ggml_metal_op_col2im_1d(ggml_metal_op_t ctx, int idx) {
 
     return 1;
 }
-int ggml_metal_op_snake(ggml_metal_op_t ctx, int idx) {
-    ggml_tensor * dst = ctx->node(idx);
-
+// Dispatch the fused snake kernel from the matched mul -> sin -> sqr -> mul -> add chain.
+// idx points at the leading mul. The autofuse caller has validated the chain.
+int ggml_metal_op_snake_fused(ggml_metal_op_t ctx, int idx) {
     ggml_metal_library_t lib = ctx->lib;
     ggml_metal_encoder_t enc = ctx->enc;
 
-    const ggml_tensor * src0 = dst->src[0];
-    const ggml_tensor * src1 = dst->src[1];
-    const ggml_tensor * src2 = dst->src[2];
+    const ggml_tensor * mul0 = ctx->node(idx + 0);
+    const ggml_tensor * sqr  = ctx->node(idx + 2);
+    const ggml_tensor * mul1 = ctx->node(idx + 3);
+    ggml_tensor *       add  = ctx->node(idx + 4);
 
-    const int T = (int)src0->ne[0];
-    const int C = (int)src0->ne[1];
+    // x carries the full activation shape, a is the broadcast operand
+    const ggml_tensor * x = ggml_are_same_shape(mul0, mul0->src[0]) ? mul0->src[0] : mul0->src[1];
+    const ggml_tensor * a = (x == mul0->src[0]) ? mul0->src[1] : mul0->src[0];
+
+    // mul1 reads sqr and inv_b in either operand order
+    const ggml_tensor * inv_b = (mul1->src[0] == sqr) ? mul1->src[1] : mul1->src[0];
+
+    const int T = (int)x->ne[0];
+    const int C = (int)x->ne[1];
     const int total = T * C;
 
-    auto pipeline = ggml_metal_library_get_pipeline_snake(lib, dst);
+    auto pipeline = ggml_metal_library_get_pipeline_snake(lib, x->type);
 
     ggml_metal_kargs_snake args = { T, C };
 
     ggml_metal_encoder_set_pipeline(enc, pipeline);
     ggml_metal_encoder_set_bytes   (enc, &args, sizeof(args), 0);
-    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(src0), 1);
-    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(src1), 2);
-    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(src2), 3);
-    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(dst),  4);
+    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(x),     1);
+    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(a),     2);
+    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(inv_b), 3);
+    ggml_metal_encoder_set_buffer  (enc, ggml_metal_get_buffer_id(add),   4);
 
     const int nth = 256;
     const int ntg = (total + nth - 1) / nth;
     ggml_metal_encoder_dispatch_threadgroups(enc, ntg, 1, 1, nth, 1, 1);
 
-    return 1;
+    return 5;
 }
 
 int ggml_metal_op_conv_transpose_2d(ggml_metal_op_t ctx, int idx) {

@@ -1761,9 +1761,9 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_col2im_1d(ggml_m
     return res;
 }
 
-ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_snake(ggml_metal_library_t lib, const ggml_tensor * op) {
+ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_snake(ggml_metal_library_t lib, enum ggml_type type) {
     const char * suffix;
-    switch (op->src[0]->type) {
+    switch (type) {
         case GGML_TYPE_F32:  suffix = "f32";  break;
         case GGML_TYPE_F16:  suffix = "f16";  break;
         case GGML_TYPE_BF16: suffix = "bf16"; break;

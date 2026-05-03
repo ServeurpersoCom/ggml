@@ -1906,10 +1906,6 @@ static void ggml_compute_forward(struct ggml_compute_params * params, struct ggm
             {
                 ggml_compute_forward_col2im_1d(params, tensor);
             } break;
-        case GGML_OP_SNAKE:
-            {
-                ggml_compute_forward_snake(params, tensor);
-            } break;
         case GGML_OP_CONV_2D:
             {
                 ggml_compute_forward_conv_2d(params, tensor);
@@ -2338,7 +2334,6 @@ static int ggml_get_n_tasks(struct ggml_tensor * node, int n_threads) {
         case GGML_OP_IM2COL:
         case GGML_OP_IM2COL_BACK:
         case GGML_OP_IM2COL_3D:
-        case GGML_OP_SNAKE:
         case GGML_OP_CONV_2D:
         case GGML_OP_CONV_3D:
         case GGML_OP_CONV_2D_DW:
@@ -3005,7 +3000,32 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
             continue;
         }
 
-        ggml_compute_forward(&params, node);
+        // Snake activation autofuse: y = x + sin^2(a * x) * inv_b.
+        // Match the naive mul -> sin -> sqr -> mul -> add chain emitted
+        // by frontends and dispatch the dedicated fused kernel instead.
+        int n_fuse = 1;
+        if (node->op == GGML_OP_MUL) {
+            const enum ggml_op snake_ops[5] = { GGML_OP_MUL, GGML_OP_SIN, GGML_OP_SQR, GGML_OP_MUL, GGML_OP_ADD };
+            if (ggml_can_fuse(cgraph, node_n, snake_ops, 5)) {
+                const struct ggml_tensor * mul0 = cgraph->nodes[node_n + 0];
+                const struct ggml_tensor * sqr  = cgraph->nodes[node_n + 2];
+                const struct ggml_tensor * mul1 = cgraph->nodes[node_n + 3];
+                struct ggml_tensor *       add  = cgraph->nodes[node_n + 4];
+                const struct ggml_tensor * x = ggml_are_same_shape(mul0, mul0->src[0]) ? mul0->src[0] : mul0->src[1];
+                const struct ggml_tensor * a = (x == mul0->src[0]) ? mul0->src[1] : mul0->src[0];
+                const struct ggml_tensor * inv_b    = (mul1->src[0] == sqr) ? mul1->src[1] : mul1->src[0];
+                const struct ggml_tensor * x_in_add = (add->src[0] == mul1) ? add->src[1] : add->src[0];
+                const bool type_ok  = (x->type == GGML_TYPE_F32 || x->type == GGML_TYPE_F16 || x->type == GGML_TYPE_BF16);
+                const bool shape_ok = ggml_are_same_shape(a, inv_b) && a->ne[0] == 1 && a->ne[1] == x->ne[1];
+                if (type_ok && shape_ok && x_in_add == x) {
+                    ggml_compute_forward_snake_fused(&params, x, a, inv_b, add);
+                    n_fuse = 5;
+                }
+            }
+        }
+        if (n_fuse == 1) {
+            ggml_compute_forward(&params, node);
+        }
 
         if (state->ith == 0 && cplan->abort_callback &&
                 cplan->abort_callback(cplan->abort_callback_data)) {
@@ -3013,9 +3033,13 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
             tp->ec    = GGML_STATUS_ABORTED;
         }
 
-        if (node_n + 1 < cgraph->n_nodes) {
+        if (node_n + n_fuse < cgraph->n_nodes) {
             ggml_barrier(state->threadpool);
         }
+
+        // Skip the remaining nodes consumed by the fused dispatch.
+        // The for-loop increment adds 1, so we add n_fuse - 1 here.
+        node_n += n_fuse - 1;
     }
 
 #ifdef GGML_USE_OPENMP
