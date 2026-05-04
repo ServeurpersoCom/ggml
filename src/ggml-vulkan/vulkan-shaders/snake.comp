@@ -25,7 +25,7 @@ float load_val(uint32_t idx) {
 
 // Store float as D_TYPE
 void store_val(uint32_t idx, float v) {
-#if defined(DATA_A_BF16)
+#if defined(DATA_D_BF16)
     data_d[idx] = D_TYPE(fp32_to_bf16(v));
 #else
     data_d[idx] = D_TYPE(v);
