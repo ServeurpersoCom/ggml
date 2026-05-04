@@ -3003,8 +3003,13 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         // Snake activation autofuse: y = x + sin^2(a * x) * inv_b.
         // Match the naive mul -> sin -> sqr -> mul -> add chain emitted
         // by frontends and dispatch the dedicated fused kernel instead.
+        static int disable_fusion = -1;
+        if (disable_fusion < 0) {
+            const char * env = getenv("GGML_CPU_DISABLE_FUSION");
+            disable_fusion = (env != NULL && atoi(env) != 0) ? 1 : 0;
+        }
         int n_fuse = 1;
-        if (node->op == GGML_OP_MUL) {
+        if (!disable_fusion && node->op == GGML_OP_MUL) {
             const enum ggml_op snake_ops[5] = { GGML_OP_MUL, GGML_OP_SIN, GGML_OP_SQR, GGML_OP_MUL, GGML_OP_ADD };
             if (ggml_can_fuse(cgraph, node_n, snake_ops, 5)) {
                 const struct ggml_tensor * mul0 = cgraph->nodes[node_n + 0];
