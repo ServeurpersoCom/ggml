@@ -5924,19 +5924,6 @@ void ggml_compute_forward_rope_back(
     }
 }
 
-// Type-generic load/store helpers for F32, F16, BF16 custom ops (col2im_1d, snake)
-template <typename T>
-static inline float snake_load(T x);
-template <> inline float snake_load(float x)       { return x; }
-template <> inline float snake_load(ggml_fp16_t x) { return GGML_FP16_TO_FP32(x); }
-template <> inline float snake_load(ggml_bf16_t x) { return GGML_BF16_TO_FP32(x); }
-
-template <typename T>
-static inline T snake_store(float x);
-template <> inline float       snake_store<float>(float x)       { return x; }
-template <> inline ggml_fp16_t snake_store<ggml_fp16_t>(float x) { return GGML_FP32_TO_FP16(x); }
-template <> inline ggml_bf16_t snake_store<ggml_bf16_t>(float x) { return GGML_FP32_TO_BF16(x); }
-
 // ggml_compute_forward_conv_transpose_1d
 
 static void ggml_compute_forward_conv_transpose_1d_f16_f32(
@@ -6711,11 +6698,11 @@ static void ggml_compute_forward_col2im_1d_impl(
                 int64_t k = t_abs - t_in * s0;
                 if (k >= 0 && k < K) {
                     // col layout: [K*OC, T_in], element (oc*K+k, t_in)
-                    sum += snake_load(col_data[(oc * K + k) + t_in * K_OC]);
+                    sum += type_conversion_table<elem_t>::to_f32(col_data[(oc * K + k) + t_in * K_OC]);
                 }
             }
             // dst layout: [T_out, OC], element (t_out, oc)
-            dst_data[t_out + oc * T_out] = snake_store<elem_t>(sum);
+            dst_data[t_out + oc * T_out] = type_conversion_table<elem_t>::from_f32(sum);
         }
     }
 }
@@ -6760,9 +6747,9 @@ static void ggml_compute_forward_snake_fused_impl(
         const elem_t * xc = xd + c * T;
         elem_t       * yc = yd + c * T;
         for (int64_t t = 0; t < T; t++) {
-            const float xi = snake_load(xc[t]);
+            const float xi = type_conversion_table<elem_t>::to_f32(xc[t]);
             const float s  = sinf(ac * xi);
-            yc[t] = snake_store<elem_t>(xi + s * s * bc);
+            yc[t] = type_conversion_table<elem_t>::from_f32(xi + s * s * bc);
         }
     }
 }

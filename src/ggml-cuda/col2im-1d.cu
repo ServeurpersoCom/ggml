@@ -1,20 +1,9 @@
 #include "col2im-1d.cuh"
+#include "convert.cuh"
 
 // col2im_1d: scatter-add GEMM columns to 1D signal (gather approach)
 // columns: [K*OC, T_in]  ->  output: [T_out, OC]
 // Supports F32, F16, BF16 data with F32 accumulator.
-
-template <typename T>
-static __device__ __forceinline__ float c2i_load(T x);
-template <> __device__ __forceinline__ float c2i_load(float x)          { return x; }
-template <> __device__ __forceinline__ float c2i_load(half x)           { return __half2float(x); }
-template <> __device__ __forceinline__ float c2i_load(nv_bfloat16 x)    { return __bfloat162float(x); }
-
-template <typename T>
-static __device__ __forceinline__ T c2i_store(float x);
-template <> __device__ __forceinline__ float       c2i_store<float>(float x)       { return x; }
-template <> __device__ __forceinline__ half        c2i_store<half>(float x)        { return __float2half(x); }
-template <> __device__ __forceinline__ nv_bfloat16 c2i_store<nv_bfloat16>(float x) { return __float2bfloat16(x); }
 
 template <typename T>
 static __global__ void col2im_1d_kernel(
@@ -42,10 +31,10 @@ static __global__ void col2im_1d_kernel(
     for (int t_in = t_in_min; t_in <= t_in_max; t_in++) {
         const int k = t_abs - t_in * s0;
         // col layout: [K*OC, T_in], column index = oc * K + k
-        sum += c2i_load(col[(oc * K + k) + t_in * K_OC]);
+        sum += ggml_cuda_cast<float>(col[(oc * K + k) + t_in * K_OC]);
     }
 
-    dst[idx] = c2i_store<T>(sum);
+    dst[idx] = ggml_cuda_cast<T>(sum);
 }
 
 void ggml_cuda_op_col2im_1d(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
