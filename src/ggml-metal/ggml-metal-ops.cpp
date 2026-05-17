@@ -278,19 +278,42 @@ static int ggml_metal_op_encode_impl(ggml_metal_op_t ctx, int idx) {
                 // Snake activation autofuse: mul -> sin -> sqr -> mul -> add
                 bool fused = false;
                 if (ctx->use_fusion) {
-                    const ggml_op snake_ops[5] = { GGML_OP_MUL, GGML_OP_SIN, GGML_OP_SQR, GGML_OP_MUL, GGML_OP_ADD };
+                    static constexpr ggml_op snake_ops[5] = { GGML_OP_MUL, GGML_OP_SIN, GGML_OP_SQR, GGML_OP_MUL, GGML_OP_ADD };
                     if (ctx->can_fuse(idx, snake_ops, 5)) {
-                        const ggml_tensor * mul0 = ctx->node(idx + 0);
-                        const ggml_tensor * sqr  = ctx->node(idx + 2);
-                        const ggml_tensor * mul1 = ctx->node(idx + 3);
-                        const ggml_tensor * add  = ctx->node(idx + 4);
+                        const ggml_tensor * mul0     = ctx->node(idx + 0);
+                        const ggml_tensor * sin_node = ctx->node(idx + 1);
+                        const ggml_tensor * sqr      = ctx->node(idx + 2);
+                        const ggml_tensor * mul1     = ctx->node(idx + 3);
+                        const ggml_tensor * add      = ctx->node(idx + 4);
+
                         const ggml_tensor * x = ggml_are_same_shape(mul0, mul0->src[0]) ? mul0->src[0] : mul0->src[1];
                         const ggml_tensor * a = (x == mul0->src[0]) ? mul0->src[1] : mul0->src[0];
                         const ggml_tensor * inv_b    = (mul1->src[0] == sqr) ? mul1->src[1] : mul1->src[0];
                         const ggml_tensor * x_in_add = (add->src[0] == mul1) ? add->src[1] : add->src[0];
-                        const bool type_ok  = (x->type == GGML_TYPE_F32 || x->type == GGML_TYPE_F16 || x->type == GGML_TYPE_BF16);
+
+                        // x is in the supported whitelist and every chain intermediate
+                        // shares x's type, since the kernel templates T over {float, half, bfloat}.
+                        // Broadcast operands a and inv_b are bound as device const float * in the
+                        // kernel, so they must be F32 regardless of x's precision.
+                        const bool types_ok =
+                            (x->type == GGML_TYPE_F32 || x->type == GGML_TYPE_F16 || x->type == GGML_TYPE_BF16) &&
+                            (a->type    == GGML_TYPE_F32) && (inv_b->type    == GGML_TYPE_F32) &&
+                            (mul0->type == x->type)       && (sin_node->type == x->type) &&
+                            (sqr->type  == x->type)       && (mul1->type     == x->type) &&
+                            (add->type  == x->type);
                         const bool shape_ok = ggml_are_same_shape(a, inv_b) && a->ne[0] == 1 && a->ne[1] == x->ne[1];
-                        if (type_ok && shape_ok && x_in_add == x) {
+                        // Kernel uses idx = tgpig * ntg + tpitg with c = idx / T, so x and add
+                        // are 2D and a / inv_b collapse to [1, C, 1, 1]. Higher dims are not handled.
+                        const bool dim_ok =
+                            (x->ne[2]     == 1) && (x->ne[3]     == 1) &&
+                            (add->ne[2]   == 1) && (add->ne[3]   == 1) &&
+                            (a->ne[2]     == 1) && (a->ne[3]     == 1) &&
+                            (inv_b->ne[2] == 1) && (inv_b->ne[3] == 1);
+                        // Kernel reads x[idx] and a[c] / inv_b[c] linearly, so every operand is contiguous.
+                        const bool contig_ok =
+                            ggml_is_contiguous(x) && ggml_is_contiguous(add) &&
+                            ggml_is_contiguous(a) && ggml_is_contiguous(inv_b);
+                        if (types_ok && shape_ok && dim_ok && contig_ok && x_in_add == x) {
                             n_fuse = ggml_metal_op_snake_fused(ctx, idx);
                             fused = true;
                         }
