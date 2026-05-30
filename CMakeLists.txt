@@ -4,8 +4,8 @@ project("ggml" C CXX ASM)
 
 ### GGML Version
 set(GGML_VERSION_MAJOR 0)
-set(GGML_VERSION_MINOR 10)
-set(GGML_VERSION_PATCH 1)
+set(GGML_VERSION_MINOR 13)
+set(GGML_VERSION_PATCH 0)
 set(GGML_VERSION_BASE "${GGML_VERSION_MAJOR}.${GGML_VERSION_MINOR}.${GGML_VERSION_PATCH}")
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
@@ -40,6 +40,9 @@ if(DEFINED GGML_GIT_DIRTY AND GGML_GIT_DIRTY EQUAL 1)
 endif()
 
 include(CheckIncludeFileCXX)
+
+# Allow longer tensor names (needed by audiocodec tokenizers)
+add_compile_definitions(GGML_MAX_NAME=128)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -249,6 +252,7 @@ option(GGML_SYCL                            "ggml: use SYCL"                    
 option(GGML_SYCL_F16                        "ggml: use 16 bit floats for sycl calculations"   OFF)
 option(GGML_SYCL_GRAPH                      "ggml: enable graphs in the SYCL backend"         ON)
 option(GGML_SYCL_HOST_MEM_FALLBACK          "ggml: allow host memory fallback in SYCL reorder (requires kernel 6.8+)" ON)
+option(GGML_SYCL_SUPPORT_LEVEL_ZERO         "ggml: use Level Zero API in SYCL backend"  ON)
 option(GGML_SYCL_DNN                        "ggml: enable oneDNN in the SYCL backend"         ON)
 set   (GGML_SYCL_TARGET "INTEL" CACHE STRING
                                             "ggml: sycl target device")
@@ -352,7 +356,7 @@ if (GGML_STANDALONE)
         @ONLY)
 
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ggml.pc
-        DESTINATION share/pkgconfig)
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
 endif()
 
 #
