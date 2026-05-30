@@ -55,8 +55,13 @@
 
 uint64_t ggml_graph_next_uid(void) {
 #ifdef _MSC_VER
+#if defined(_WIN32)
+    static volatile LONG counter = 1;
+    return (uint64_t) InterlockedIncrement(&counter) - 1;
+#else
     static volatile long long counter = 1;
     return (uint64_t) _InterlockedIncrement64(&counter) - 1;
+#endif
 #else
     static uint64_t counter = 1;
     return __atomic_fetch_add(&counter, 1, __ATOMIC_RELAXED);
@@ -1026,11 +1031,8 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "IM2COL",
     "IM2COL_BACK",
     "IM2COL_3D",
-    "COL2IM_1D",
-    "CONV_2D",
-    "CONV_3D",
-    "CONV_2D_DW",
     "CONV_TRANSPOSE_2D",
+    "COL2IM_1D",
     "POOL_1D",
     "POOL_2D",
     "POOL_2D_BACK",
@@ -1136,8 +1138,8 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "conv_transpose_1d(x)",
     "im2col(x)",
     "im2col_back(x)",
-    "im2col_3d(x)",
     "col2im_1d(x)",
+    "im2col_3d(x)",
     "conv_2d(x)",
     "conv_3d(x)",
     "conv_2d_dw(x)",
@@ -3261,6 +3263,16 @@ void ggml_mul_mat_set_prec(
     ggml_set_op_params_i32(a, 0, prec_i32);
 }
 
+void ggml_mul_mat_set_hint(
+        struct ggml_tensor * a,
+        enum ggml_op_hint    hint) {
+    GGML_ASSERT(a->op == GGML_OP_MUL_MAT);
+
+    const int32_t hint_i32 = (int32_t) hint;
+
+    ggml_set_op_params_i32(a, 1, hint_i32);
+}
+
 // ggml_mul_mat_id
 
 /*
@@ -4464,7 +4476,6 @@ struct ggml_tensor * ggml_im2col_back(
 
     return result;
 }
-
 // ggml_col2im_1d
 
 struct ggml_tensor * ggml_col2im_1d(
@@ -6228,11 +6239,13 @@ struct ggml_tensor * ggml_gated_delta_net(
     GGML_ASSERT(g->ne[0] == 1 || g->ne[0] == S_v);
     GGML_ASSERT(beta->ne[0] == 1);
 
-    GGML_ASSERT(ggml_nelements(state) == S_v * S_v * H * n_seqs);
-
-    // concat output and new_state into a single tensor
-    // output: S_v * H * n_tokens * n_seqs, state: S_v * S_v * H * n_seqs
-    const int64_t ne[4] = { S_v * H, n_tokens * n_seqs + S_v * n_seqs, 1, 1 };
+    // state is a 3D tensor (S_v*S_v*H, K, n_seqs). K is the snapshot slot count.
+    GGML_ASSERT(state->ne[0] == S_v * S_v * H);
+    GGML_ASSERT(state->ne[2] == n_seqs);
+    GGML_ASSERT(state->ne[3] == 1);
+    const int64_t K = state->ne[1];
+    const int64_t state_rows = K * S_v * n_seqs;
+    const int64_t ne[4] = { S_v * H, n_tokens * n_seqs + state_rows, 1, 1 };
     struct ggml_tensor * result = ggml_new_tensor(ctx, GGML_TYPE_F32, 4, ne);
 
     result->op     = GGML_OP_GATED_DELTA_NET;
