@@ -3966,6 +3966,15 @@ int ggml_metal_op_snake_fused(ggml_metal_op_t ctx, int idx) {
     const int C     = (int) x->ne[1];
     const int total = T * C;
 
+    // the encode loop pre-checked the leading mul only, check the rest of the chain
+    for (int i = 1; i < 5; ++i) {
+        if (!ggml_metal_op_concurrency_check(ctx, ctx->node(idx + i))) {
+            ggml_metal_op_concurrency_reset(ctx);
+
+            break;
+        }
+    }
+
     auto pipeline = ggml_metal_library_get_pipeline_snake(lib, x->type);
 
     ggml_metal_kargs_snake args = {
