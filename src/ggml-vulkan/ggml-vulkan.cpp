@@ -12064,7 +12064,10 @@ template <> void init_pushconst_tensor_offsets(ggml_backend_vk_context * ctx, vk
     const uint32_t b_offset = get_misalign_bytes(ctx, src1) / ggml_type_size(src1->type);
     const uint32_t d_offset = get_misalign_bytes(ctx, dst) / ggml_type_size(dst->type);
 
-    GGML_ASSERT(dst->op != GGML_OP_GET_ROWS || (a_offset == 0 && b_offset == 0 && d_offset == 0));
+    // The get_rows.comp shader consumes all three misalign offsets; the
+    // quant variant consumes b and d but cannot express a sub block
+    // src0 offset in elements, so only that case stays rejected.
+    GGML_ASSERT(dst->op != GGML_OP_GET_ROWS || !ggml_is_quantized(src0->type) || a_offset == 0);
 
     p.misalign_offsets = (a_offset << 16) | (b_offset << 8) | d_offset;
 
